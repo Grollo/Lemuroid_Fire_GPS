@@ -24,7 +24,7 @@ dependencies {
     implementation(deps.libs.gdrive.apiClient)
     implementation(deps.libs.gdrive.apiClientAndroid)
     implementation(deps.libs.gdrive.apiServicesDrive)
-    implementation(deps.libs.play.playServices)
+    implementation(deps.libs.play.playServicesAuth)
     implementation(deps.libs.play.coroutine)
     implementation(deps.libs.androidx.lifecycle.commonJava8)
     kapt(deps.libs.androidx.lifecycle.processor)

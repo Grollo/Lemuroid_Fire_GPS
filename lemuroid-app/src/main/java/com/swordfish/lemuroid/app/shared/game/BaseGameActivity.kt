@@ -1,15 +1,19 @@
 package com.swordfish.lemuroid.app.shared.game
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.swordfish.lemuroid.app.mobile.feature.game.GameActivity
@@ -20,6 +24,7 @@ import com.swordfish.lemuroid.app.shared.GameMenuContract
 import com.swordfish.lemuroid.app.shared.ImmersiveActivity
 import com.swordfish.lemuroid.app.shared.coreoptions.CoreOption
 import com.swordfish.lemuroid.app.shared.coreoptions.LemuroidCoreOption
+import com.swordfish.lemuroid.app.shared.firegps.FireGPSLogic
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSideEffects
 import com.swordfish.lemuroid.app.shared.input.InputDeviceManager
 import com.swordfish.lemuroid.app.shared.rumble.RumbleManager
@@ -86,6 +91,17 @@ abstract class BaseGameActivity : ImmersiveActivity() {
 
     private lateinit var baseGameScreenViewModel: BaseGameScreenViewModel
 
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+            if (isGranted) {
+                Timber.i("FireGPS: Location permission granted")
+                baseGameScreenViewModel.retroGameView.updateGpsStatus(FireGPSLogic.STATUS_READY)
+            } else {
+                Timber.w("FireGPS: Location permission denied")
+                baseGameScreenViewModel.retroGameView.updateGpsStatus(FireGPSLogic.STATUS_PERMISSION_DENIED)
+            }
+        }
+
     private val startGameTime = System.currentTimeMillis()
     private var finishTriggered = false
 
@@ -146,7 +162,19 @@ abstract class BaseGameActivity : ImmersiveActivity() {
             },
         )
 
+        ensureLocationPermission()
+
         initialiseFlows()
+    }
+
+    private fun ensureLocationPermission() {
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
     }
 
     @Composable

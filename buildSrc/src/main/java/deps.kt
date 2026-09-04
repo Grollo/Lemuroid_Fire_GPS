@@ -133,7 +133,8 @@ object deps {
             const val reviewKtx = "com.google.android.play:review-ktx:2.0.0"
             const val featureDelivery = "com.google.android.play:feature-delivery:2.1.0"
             const val featureDeliveryKtx = "com.google.android.play:feature-delivery-ktx:2.1.0"
-            const val playServices = "com.google.android.gms:play-services-auth:17.0.0"
+            const val playServicesAuth = "com.google.android.gms:play-services-auth:17.0.0"
+            const val playServicesLocation = "com.google.android.gms:play-services-location:21.3.0"
             const val coroutine = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.6.4"
         }
         object gdrive {

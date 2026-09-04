@@ -279,6 +279,7 @@ class BaseGameScreenViewModel(
             try {
                 delay(appContext.longAnimationDuration().toLong())
                 retroGameView.retroGameViewFlow().reset()
+                retroGameView.triggerReinjection()
             } catch (e: Throwable) {
                 Timber.e(e, "Error in reset")
             }

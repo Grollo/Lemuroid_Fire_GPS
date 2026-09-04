@@ -142,20 +142,24 @@ class GameViewModelSaves(
     }
 
     private fun loadSaveState(saveState: SaveState): Boolean {
-        val retroGameView = retroGameView.retroGameView ?: return false
+        val retroView = retroGameView.retroGameView ?: return false
 
         if (systemCoreConfig.statesVersion != saveState.metadata.version) {
             throw IncompatibleStateException()
         }
 
         if (system.hasMultiDiskSupport &&
-            retroGameView.getAvailableDisks() > 1 &&
-            retroGameView.getCurrentDisk() != saveState.metadata.diskIndex
+            retroView.getAvailableDisks() > 1 &&
+            retroView.getCurrentDisk() != saveState.metadata.diskIndex
         ) {
-            retroGameView.changeDisk(saveState.metadata.diskIndex)
+            retroView.changeDisk(saveState.metadata.diskIndex)
         }
 
-        return retroGameView.unserializeState(saveState.state)
+        val success = retroView.unserializeState(saveState.state)
+        if (success) {
+            retroGameView.triggerReinjection()
+        }
+        return success
     }
 
     fun saveQuickSave() {

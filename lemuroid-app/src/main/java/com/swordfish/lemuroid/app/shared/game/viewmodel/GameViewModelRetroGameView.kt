@@ -1,7 +1,9 @@
 package com.swordfish.lemuroid.app.shared.game.viewmodel
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
@@ -9,6 +11,8 @@ import androidx.lifecycle.LifecycleOwner
 import com.swordfish.lemuroid.BuildConfig
 import com.swordfish.lemuroid.R
 import com.swordfish.lemuroid.app.mobile.feature.settings.SettingsManager
+import com.swordfish.lemuroid.app.shared.firegps.FireGPSLogic
+import com.swordfish.lemuroid.app.shared.firegps.LocationFileParser
 import com.swordfish.lemuroid.app.shared.game.ShaderChooser
 import com.swordfish.lemuroid.app.shared.rumble.RumbleManager
 import com.swordfish.lemuroid.app.shared.settings.HDModeQuality
@@ -29,6 +33,11 @@ import com.swordfish.libretrodroid.GLRetroViewData
 import com.swordfish.libretrodroid.ImmersiveMode
 import com.swordfish.libretrodroid.Variable
 import com.swordfish.libretrodroid.VirtualFile
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -42,6 +51,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import kotlin.time.Duration.Companion.seconds
 
@@ -73,6 +83,31 @@ class GameViewModelRetroGameView(
 
     private val retroGameViewFlow = MutableStateFlow<GLRetroView?>(null)
     var retroGameView: GLRetroView? by MutableStateProperty(retroGameViewFlow)
+
+    val fireGPSLogic = FireGPSLogic()
+    
+    private val fusedLocationClient: FusedLocationProviderClient by lazy {
+        LocationServices.getFusedLocationProviderClient(appContext)
+    }
+    
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(locationResult: LocationResult) {
+            val lastLocation = locationResult.lastLocation ?: return
+            val view = retroGameView ?: return
+            fireGPSLogic.updateLocation(lastLocation, view)
+        }
+    }
+
+    fun updateGpsStatus(status: Int) {
+        fireGPSLogic.setStatus(status)
+        val view = retroGameView ?: return
+        fireGPSLogic.writeStatusToRam(view)
+        
+        // If permission was just granted, start updates immediately
+        if (status == FireGPSLogic.STATUS_READY) {
+            startLocationUpdates()
+        }
+    }
 
     fun getGameState(): Flow<GameState> {
         return gameState.debounce(200)
@@ -179,10 +214,99 @@ class GameViewModelRetroGameView(
             }
         }
 
+        val gameData = currentState.gameData
+        
+        scope.launch {
+            val romUriString = gameData.game.fileUri
+            var parseResult: LocationFileParser.ParseResult? = null
+            var expectedCsvPath = ""
+            
+            // Try to load via SAF first (handles content:// URIs from folder picker)
+            if (romUriString.startsWith("content://")) {
+                expectedCsvPath = romUriString.replace(Regex("\\.[a-zA-Z0-9]+$"), "") + ".csv"
+                if (expectedCsvPath == romUriString) {
+                    expectedCsvPath = "$romUriString.csv"
+                }
+                
+                try {
+                    val csvUri = Uri.parse(expectedCsvPath)
+                    withContext(Dispatchers.IO) {
+                        appContext.contentResolver.openInputStream(csvUri)?.use { inputStream ->
+                            parseResult = LocationFileParser.parse(inputStream)
+                            Timber.i("FireGPS: Successfully read CSV from SAF URI: $expectedCsvPath")
+                        }
+                    }
+                } catch (ignored: Exception) {
+                    Timber.w("FireGPS: Could not open CSV via SAF URI, trying local file fallback.")
+                }
+            }
+
+            if (parseResult == null) {
+                // Re-identify ROM file
+                val romFile = when (val gameFiles = gameData.gameFiles) {
+                    is RomFiles.Standard -> gameFiles.files.firstOrNull()
+                    is RomFiles.Virtual -> java.io.File(gameFiles.files.firstOrNull()?.filePath ?: "")
+                    else -> null
+                }
+
+                if (romFile != null) {
+                    val csvFile = java.io.File(romFile.parent, romFile.nameWithoutExtension + ".csv")
+                    expectedCsvPath = csvFile.absolutePath
+                    if (withContext(Dispatchers.IO) { csvFile.exists() }) {
+                        try {
+                            withContext(Dispatchers.IO) { 
+                                parseResult = LocationFileParser.parse(csvFile.inputStream()) 
+                            }
+                            Timber.i("FireGPS: Successfully read CSV from local file: ${csvFile.name}")
+                        } catch (e: Exception) {
+                            Timber.e(e, "FireGPS: Error reading CSV file")
+                        }
+                    }
+                }
+            }
+
+            // Handle Toast feedback for the user
+            val resultObj = parseResult
+            if (resultObj == null) {
+                sideEffects.showToast("FireGPS: Location file not found at $expectedCsvPath")
+                Timber.w("FireGPS: No location file found at $expectedCsvPath")
+            } else {
+                fireGPSLogic.setAreas(resultObj.areas)
+                
+                if (resultObj.malformedLineNumbers.isNotEmpty()) {
+                    sideEffects.showToast("FireGPS: Found malformed line: ${resultObj.malformedLineNumbers.first()}")
+                } else if (resultObj.areas.size != FireGPSLogic.MAX_AREAS) {
+                    sideEffects.showToast("FireGPS: File has ${resultObj.areas.size}/${FireGPSLogic.MAX_AREAS} areas.")
+                } else {
+                    sideEffects.showToast("FireGPS: Successfully loaded ${FireGPSLogic.MAX_AREAS} areas.")
+                }
+            }
+            
+            delay(5.seconds)
+            Timber.i("FireGPS: Starting injection of area names")
+            fireGPSLogic.writeAreaNamesToRam(result)
+            Timber.i("FireGPS: Names injected and kept active")
+            
+            // Sync initial status and location to RAM
+            fireGPSLogic.writeStatusToRam(result)
+            checkLastKnownLocation()
+        }
+
         retroGameViewFlow.value = result
         gameState.value = GameState.Ready
 
         return currentState.gameData to result
+    }
+
+    fun triggerReinjection() {
+        val view = retroGameView ?: return
+        scope.launch {
+            delay(1.seconds) // Wait a bit for the operation (reset/load) to settle
+            Timber.i("FireGPS: Triggering re-injection sequence")
+            fireGPSLogic.writeAreaNamesToRam(view)
+            fireGPSLogic.writeAreaIdToRam(view, fireGPSLogic.getCurrentAreaId())
+            fireGPSLogic.writeStatusToRam(view)
+        }
     }
 
     suspend fun retroGameViewFlow() =
@@ -291,6 +415,77 @@ class GameViewModelRetroGameView(
 
         owner.launchOnState(Lifecycle.State.RESUMED) {
             initializeRumbleFlow()
+        }
+    }
+
+    override fun onStart(owner: LifecycleOwner) {
+        super.onStart(owner)
+        startLocationUpdates()
+    }
+
+    override fun onResume(owner: LifecycleOwner) {
+        super.onResume(owner)
+        // Immediate check on resume (phone unlock / app switch) with 1s delay
+        scope.launch {
+            delay(1.seconds)
+            checkLastKnownLocation()
+        }
+    }
+
+    override fun onStop(owner: LifecycleOwner) {
+        super.onStop(owner)
+        stopLocationUpdates()
+    }
+
+    @SuppressLint("MissingPermission", "VisibleForTests")
+    fun startLocationUpdates() {
+        if (ContextCompat.checkSelfPermission(
+                appContext,
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        val locationRequest = LocationRequest.create().apply {
+            interval = 20000 // 20 seconds
+            fastestInterval = 10000 // 10 seconds
+            priority = LocationRequest.PRIORITY_HIGH_ACCURACY
+        }
+
+        fusedLocationClient.requestLocationUpdates(
+            locationRequest,
+            locationCallback,
+            appContext.mainLooper
+        )
+        Timber.i("FireGPS: Started periodic location updates (20s)")
+    }
+
+    private fun stopLocationUpdates() {
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+        Timber.i("FireGPS: Stopped location updates")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun checkLastKnownLocation() {
+        if (ContextCompat.checkSelfPermission(
+                appContext,
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            updateGpsStatus(FireGPSLogic.STATUS_PERMISSION_DENIED)
+            return
+        }
+
+        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+            location?.let {
+                val view = retroGameView ?: return@addOnSuccessListener
+                fireGPSLogic.updateLocation(it, view)
+                Timber.i("FireGPS: Performed immediate resume location check")
+            } ?: run {
+                updateGpsStatus(FireGPSLogic.STATUS_SIGNAL_LOST)
+                Timber.w("FireGPS: Last known location is null (Signal lost / Fix pending)")
+            }
         }
     }
 

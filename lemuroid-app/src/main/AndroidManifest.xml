@@ -16,6 +16,9 @@
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -25,6 +28,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:name="com.swordfish.lemuroid.app.LemuroidApplication"
@@ -101,7 +106,6 @@
             android:exported="true"
             android:theme="@style/LemuroidLeanbackTheme">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
             <intent-filter>

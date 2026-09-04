@@ -96,12 +96,18 @@ android {
             isMinifyEnabled = true
             signingConfig = signingConfigs["release"]
             proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
-            resValue("string", "lemuroid_name", "Lemuroid")
+            resValue("string", "lemuroid_name", "Lemuroid Fire GPS")
         }
         getByName("debug") {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-DEBUG"
-            resValue("string", "lemuroid_name", "LemuroiDebug")
+            resValue("string", "lemuroid_name", "Lemuroid Fire GPS")
+        }
+    }
+
+    applicationVariants.all {
+        outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName = "Lemuroid_Fire_GPS.apk"
         }
     }
 
@@ -182,6 +188,8 @@ dependencies {
     implementation(deps.libs.startup)
     implementation(deps.libs.kotlin.serialization)
     implementation(deps.libs.kotlin.serializationJson)
+    implementation(deps.libs.play.playServicesLocation)
+    implementation(deps.libs.play.coroutine)
 
     implementation(platform(deps.libs.androidx.compose.composeBom))
     implementation(deps.libs.androidx.compose.material3)
