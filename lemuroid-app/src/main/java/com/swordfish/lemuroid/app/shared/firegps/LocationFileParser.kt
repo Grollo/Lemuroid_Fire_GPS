@@ -28,7 +28,8 @@ object LocationFileParser {
                     return@forEachIndexed
                 }
 
-                val parts = trimmed.split(";")
+                val delimiter = if (trimmed.contains(";")) ";" else ","
+                val parts = trimmed.split(delimiter)
                 if (parts.size == 6) {
                     try {
                         areas.add(
